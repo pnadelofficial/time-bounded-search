@@ -1,0 +1,6 @@
+streamlit
+traitlets 
+streamlit-anywidget
+python-docx
+pandas
+numpy

@@ -1,6 +1,5 @@
 import streamlit as st
 import utils as u
-import traitlets
 from streamlit_anywidget import anywidget
 
 st.title("Hepatitis C Timeline")

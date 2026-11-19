@@ -6,10 +6,7 @@ from docx.enum.text import WD_COLOR_INDEX
 import pandas as pd
 from pandas._libs.tslibs.parsing import DateParseError
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from pprint import pprint
-import json
-from tqdm import tqdm
 
 color_mapping = {
     RGBColor(0xed, 0x7d, 0x31): "Activist or disease-related groups, organizations",
@@ -296,43 +293,3 @@ def report_result(results, date_key_from_timetable, grouped, topics):
         print(f"Newspaper: {results[i]['Newspaper']}")
         pprint(f"{results[i]['chunks']}")
         print("-"*40)
-
-def main():
-    timetable = TimeTable("Timetable-REV7 Hypotheses re press coverage of Hepatitis C in UK +color coding.docx", date_pattern)
-
-    df = pd.read_csv("./all_ratings811.csv")
-    def parse_date(val):
-        for fmt in ('%Y-%m-%d', '%B %d, %Y'):
-            try:
-                return pd.to_datetime(val, format=fmt)
-            except (ValueError, TypeError) as e:
-                continue
-        return pd.NaT  # fallback if nothing matches
-
-    df['Date'] = df['Date'].apply(lambda x: x.replace(" 00:00:00", "").split("_")[0]).apply(parse_date)
-    df = df[["Title", "Date", "Author", "Newspaper", "Source", "newspaper_type", "chunks"]]
-
-    model = SentenceTransformer("/Users/pnadel01/models/fp/google_embeddinggemma-300m", device="mps")
-    precomputed_embeddings = np.load('doc-embeddings811.npy')
-    tbs = TimeBoundedSearch(df, timetable, model=model)
-    
-    results_by_date_key = {}
-    for date_key in tqdm(list(timetable.grouped.keys()), total=len(timetable.grouped)):
-        results = tbs.time_bounded_search(
-            date_key_from_timetable=date_key, 
-            month_threshold=sum([thresholds[t] for t in timetable.topics[date_key]])//len(timetable.topics[date_key]) if len(timetable.topics[date_key]) > 0 else 3, # vary by category: specific events should be smaller, more vague (drugs coming out) should be larger
-            go_backwards=True, 
-            precomputed_embeddings=precomputed_embeddings, 
-            scale_fn=inverse_square, 
-            date_weight=0.5, 
-            sim_threshold=.75, # see month_threshold 
-            newspaper=None
-        )
-        results_by_date_key[(date_key)] = results
-    
-    with open("tbs_results1020.json", "w") as json_file:
-        json.dump(results_by_date_key, json_file, default=str, indent=4)
-    return results_by_date_key
-
-if __name__ == "__main__":
-    main()
