@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-import anywidget, traitlets
+import anywidget
+import traitlets
 
 import json
 import re 
