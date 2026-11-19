@@ -10,4 +10,5 @@ dependencies = [
     "pandas>=3.0.5",
     "python-docx>=1.2.0",
     "sentence-transformers>=5.7.0",
+    "torchvision>=0.29.2",
 ]

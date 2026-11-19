@@ -1,6 +1,8 @@
 import re
 from collections import defaultdict
 from docx import Document
+from docx.shared import RGBColor
+from docx.enum.text import WD_COLOR_INDEX
 import pandas as pd
 from pandas._libs.tslibs.parsing import DateParseError
 import numpy as np
@@ -8,6 +10,70 @@ from sentence_transformers import SentenceTransformer
 from pprint import pprint
 import json
 from tqdm import tqdm
+
+color_mapping = {
+    RGBColor(0xed, 0x7d, 0x31): "Activist or disease-related groups, organizations",
+    RGBColor(0xee, 0x00, 0x00): "Concerning haemophiliacs",
+    RGBColor(0xda, 0x73, 0x26): "Activist or disease-related groups, organizations",
+    RGBColor(0x20, 0x25, 0xe8): "Campaigns, Compensation/payments",
+    RGBColor(0x44, 0x72, 0xc4): "Campaigns, Compensation/payments",
+    RGBColor(0xc0, 0x00, 0x00): "HIV/AIDS issues",
+    RGBColor(0xc1, 0x15, 0x11): "HIV/AIDS issues",
+    RGBColor(0x17, 0x2e, 0xdb): "Campaigns, Compensation/payments",
+    RGBColor(0xc4, 0x59, 0x11): "Activist or disease-related groups, organizations",
+    RGBColor(0xff, 0xc0, 0x00): "Activist or disease-related groups, organizations",
+    RGBColor(0x00, 0x80, 0x00): "Treatments",
+    WD_COLOR_INDEX.YELLOW: "Specific reference to hepatitis C, or people infected with HCV",
+    RGBColor(0x00, 0x00, 0x00): "No topic",
+    RGBColor(0xcc, 0x00, 0x99): "Legal cases, Trials and Settlements and Public Inquiries",
+    RGBColor(0x00, 0x76, 0x35): "Treatments",
+    RGBColor(0x05, 0xff, 0x76): "Science",
+    RGBColor(0x00, 0x99, 0xff): "Event - not compensation",
+    RGBColor(0x5c, 0xa2, 0xee): "Event - not compensation",
+    RGBColor(0x21, 0x06, 0xe8): "Campaigns, Compensation/payments",
+    RGBColor(0x37, 0x46, 0xd1): "Campaigns, Compensation/payments",
+    RGBColor(0x2e, 0x13, 0xf9): "Campaigns, Compensation/payments",
+    RGBColor(0x33, 0xcc, 0xcc): "Non-haemophiliacs with HIV, usually regarding payments or compensation",
+    RGBColor(0x00, 0xb0, 0xf0): "Event - not compensation",
+    WD_COLOR_INDEX.TURQUOISE: "Press",
+    RGBColor(0x2f, 0xff, 0x8d): "Science",
+    RGBColor(0xb1, 0x25, 0xa7): "Legal cases, Trials and Settlements and Public Inquiries",
+    RGBColor(0x0f, 0x4d, 0xb1): "Campaigns, Compensation/payments",
+    RGBColor(0x00, 0x86, 0x3d): "Treatments",
+    RGBColor(0x00, 0x70, 0xc0): "Campaigns, Compensation/payments",
+    RGBColor(0x00, 0x00, 0xff): "Campaigns, Compensation/payments",
+    WD_COLOR_INDEX.PINK: "Other countries' HCV scandals/Inquiries",
+    RGBColor(0x00, 0x33, 0xcc): "Campaigns, Compensation/payments",
+    RGBColor(0x66, 0xff, 0xcc): "Non-haemophiliacs with HIV, usually regarding payments or compensation",
+    RGBColor(0x00, 0xb0, 0x50): "Treatments",
+    RGBColor(0x00, 0xff, 0x99): "Science", 
+    RGBColor(0x21, 0x4b, 0xff): "Campaigns, Compensation/payments",
+    RGBColor(0x06, 0x30, 0xe0): "Campaigns, Compensation/payments",
+    RGBColor(0xff, 0x00, 0x00): "Concerning haemophiliacs",
+    RGBColor(0xff, 0x21, 0x21): "Concerning haemophiliacs",
+    RGBColor(0x8a, 0x21, 0xab): "Legal cases, Trials and Settlements and Public Inquiries",
+    RGBColor(0x70, 0xad, 0x47): "Treatments",
+    RGBColor(0x0e, 0x51, 0xe8): "Campaigns, Compensation/payments",
+    RGBColor(0x48, 0xb8, 0xab): "Non-haemophiliacs with HIV, usually regarding payments or compensation",
+    
+}
+
+thresholds = {
+    "Activist or disease-related groups, organizations": 3,
+    "Non-haemophiliacs with HIV, usually regarding payments or compensation": 3,
+    "Campaigns, Compensation/payments": 1,
+    "Treatments": 6,
+    "Legal cases, Trials and Settlements and Public Inquiries": 1,
+    "Science": 12,
+    "Other countries' HCV scandals/Inquiries": 12,
+    "Concerning haemophiliacs": 1,
+    "Press": 1,
+    "HIV/AIDS issues": 1,
+    "Event - not compensation": 1,
+    "No topic": 3,
+    "Non-haemophiliacs with HIV, usually regarding payments or compensation": 3,
+    'Specific reference to hepatitis C, or people infected with HCV': 3
+}
 
 months = r'(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)'
 date_pattern = r'\b(?:' \
@@ -24,7 +90,7 @@ class TimeTable:
 
         self.doc = Document(word_path)
         self.bullets = self.extract_only_bullets(self.doc)
-        self.grouped = self.group_bullets_by_date_dict(self.bullets)
+        self.grouped, self.topics = self.group_bullets_by_date_dict(self.bullets)
     
     def extract_only_bullets(self, doc):
         bullet_points = []
@@ -44,8 +110,16 @@ class TimeTable:
                         
                         # Check if it's a bullet (not numbered)
                         if self.is_bullet_list(doc, num_id):
-                            bullet_points.append(paragraph.text)
-        
+                            topics_incom = {color_mapping[run.font.color.rgb] for run in paragraph.runs if run.font.color.rgb is not None and run.font.color.rgb != RGBColor(0x12, 0x12, 0x12)}
+                            rest_topics = {color_mapping[run.font.highlight_color] for run in paragraph.runs if run.font.highlight_color is not None}
+                            
+                            if rest_topics == {None}:
+                                topics = topics_incom
+                            else:
+                                topics = topics_incom | rest_topics
+                                topics.discard(None) 
+                            bullet_points.append((paragraph.text, topics))
+        print("Colors all passing")
         return bullet_points
 
     def is_bullet_list(self, doc, num_id):
@@ -96,23 +170,29 @@ class TimeTable:
     def group_bullets_by_date_dict(self, bullet_list):
         """Create dictionary with dates as keys and associated text as values"""
         date_dict = defaultdict(list)
+        topic_dict = {}
         current_date = None
         
         for bullet in bullet_list:
-            date_str = self.extract_date(bullet)
+            text, topics = bullet
+            date_str = self.extract_date(text)
             
             if date_str:
+                i = 1
                 # This bullet has a date - start a new entry
                 current_date = date_str
                 # Remove date from text and make it the first element
-                text_without_date = self.remove_date(bullet, date_str)
-                date_dict[current_date].append(text_without_date)
+                text_without_date = self.remove_date(text, date_str)
+                date_dict[f"{current_date}_{i}"].append(text_without_date)
+                topic_dict[f"{current_date}_{i}"] = topics
             else:
-                # This bullet doesn't have a date - add to current date's list
+                # This bullet doesn't have a date - start a new entry appended with i
                 if current_date:
-                    date_dict[current_date].append(bullet)
+                    i += 1
+                    date_dict[f"{current_date}_{i}"].append(text)
+                    topic_dict[f"{current_date}_{i}"] = topics
         
-        return dict(date_dict)
+        return dict(date_dict), topic_dict
 
 def inverse_square(days_diff, max_days=365*2):
     normalized_diff = days_diff / max_days
@@ -125,6 +205,7 @@ class TimeBoundedSearch:
         self.sent_sim_template = "task: sentence similarity | query: {content}"
         self.timetable = timetable
         self.grouped = self.timetable.grouped
+        self.topcis = self.timetable.topics
     
     def scale_score(self, sim_scores, item_dates, target_date, scaler_func, date_weight):
         sim_scores = np.array(sim_scores)
@@ -138,7 +219,7 @@ class TimeBoundedSearch:
         if "Late" in date_str:
             year = int(year)+6
             new_date_str = f"1/1/{year}"
-        elif "Early":
+        elif "Early" in date_str:
             new_date_str = f"1/1/{year}"
 
         return pd.to_datetime(new_date_str)
@@ -150,8 +231,10 @@ class TimeBoundedSearch:
         else:
             df = self.df
         associated_text = self.grouped[date_key_from_timetable]
+        # some keys have multiple events
         query_embedding = self.model.encode(self.sent_sim_template.format(content=associated_text))
 
+        date_key_from_timetable = date_key_from_timetable.split("_")[0]
         try:
             key_dt = pd.to_datetime(date_key_from_timetable)
         except DateParseError as e:
@@ -170,6 +253,10 @@ class TimeBoundedSearch:
                 (df.Date >= key_dt) &          # backward looking
                 (df.Date <= key_dt + buffer)   # forward looking
             ]
+
+        if len(zone_of_interest) == 0:
+            print("No results found.")
+            return []
 
         print(f"Processing {len(zone_of_interest)} documents in the zone of interest...")
         if precomputed_embeddings is not None:
@@ -190,10 +277,11 @@ class TimeBoundedSearch:
         print(f"Final length of results: {len(results)}")
         return results
 
-def report_result(results, date_key_from_timetable, grouped):
+def report_result(results, date_key_from_timetable, grouped, topics):
     print("-"*40)
     print(f"Date from timetable: {date_key_from_timetable}")
     pprint(grouped[date_key_from_timetable])
+    pprint(f"Topics: {topics[date_key_from_timetable]}")
     if len(results) == 0:
         print(f"No results found for {date_key_from_timetable}")
         print("-"*40)
@@ -207,11 +295,10 @@ def report_result(results, date_key_from_timetable, grouped):
         print(f"Date: {results[i]['Date']}")
         print(f"Newspaper: {results[i]['Newspaper']}")
         pprint(f"{results[i]['chunks']}")
-        # print(f"Rating: {result['rating']*5}")
         print("-"*40)
 
 def main():
-    timetable = TimeTable("Timetable-REV5 Hypotheses re press coverage of Hepatitis C in UK.docx", date_pattern)
+    timetable = TimeTable("Timetable-REV7 Hypotheses re press coverage of Hepatitis C in UK +color coding.docx", date_pattern)
 
     df = pd.read_csv("./all_ratings811.csv")
     def parse_date(val):
@@ -222,10 +309,10 @@ def main():
                 continue
         return pd.NaT  # fallback if nothing matches
 
-    df['Date'] = df['Date'].apply(lambda x: x.replace(" 00:00:00", "")).apply(parse_date)
+    df['Date'] = df['Date'].apply(lambda x: x.replace(" 00:00:00", "").split("_")[0]).apply(parse_date)
     df = df[["Title", "Date", "Author", "Newspaper", "Source", "newspaper_type", "chunks"]]
 
-    model = SentenceTransformer("/Users/pnadel01/fp_models/google_embeddinggemma-300m", device="mps")
+    model = SentenceTransformer("/Users/pnadel01/models/fp/google_embeddinggemma-300m", device="mps")
     precomputed_embeddings = np.load('doc-embeddings811.npy')
     tbs = TimeBoundedSearch(df, timetable, model=model)
     
@@ -233,17 +320,17 @@ def main():
     for date_key in tqdm(list(timetable.grouped.keys()), total=len(timetable.grouped)):
         results = tbs.time_bounded_search(
             date_key_from_timetable=date_key, 
-            month_threshold=3, 
+            month_threshold=sum([thresholds[t] for t in timetable.topics[date_key]])//len(timetable.topics[date_key]) if len(timetable.topics[date_key]) > 0 else 3, # vary by category: specific events should be smaller, more vague (drugs coming out) should be larger
             go_backwards=True, 
             precomputed_embeddings=precomputed_embeddings, 
             scale_fn=inverse_square, 
             date_weight=0.5, 
-            sim_threshold=.75, 
+            sim_threshold=.75, # see month_threshold 
             newspaper=None
         )
-        results_by_date_key[date_key] = results
+        results_by_date_key[(date_key)] = results
     
-    with open("tbs_results811.json", "w") as json_file:
+    with open("tbs_results1119.json", "w") as json_file:
         json.dump(results_by_date_key, json_file, default=str, indent=4)
     return results_by_date_key
 
