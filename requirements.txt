@@ -1,6 +1,7 @@
 streamlit
 traitlets 
 streamlit-anywidget
+anywidget
 python-docx
 pandas
 numpy
