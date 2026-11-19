@@ -5,3 +5,4 @@ anywidget
 python-docx
 pandas
 numpy
+jupyter
