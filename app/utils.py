@@ -334,7 +334,7 @@ def handle_ambiguous_dates_end(date_str):
 
 @st.cache_data
 def load_data():
-    timetable = TimeTable("Timetable-REV7 Hypotheses re press coverage of Hepatitis C in UK +color coding.docx", date_pattern)
+    timetable = TimeTable("Timetable-REV7 shortened-Hypotheses re press coverage of Hepatitis C in UK +color coding.docx", date_pattern)
     with open("tbs_results1020.json", "r") as json_file:
         results_by_date_key = json.load(json_file)
 
@@ -350,6 +350,8 @@ def load_data():
     long_days = 5
     items = []
     for i, row in df.iterrows():
+        if row["timetable_entry"] not in results_by_date_key:
+            continue
         span = (row.end - row.start).days if row.end else 0
         item = {
             "id":i+1,
